@@ -1,0 +1,35 @@
+name: Reusable AI Triage Suite
+
+on:
+  workflow_call:
+    inputs:
+      enable_conflict_resolution:
+        description: "Enable AI conflict resolution"
+        type: boolean
+        default: true
+        required: false
+      enable_review:
+        description: "Enable AI first-pass review with Jules tasking"
+        type: boolean
+        default: true
+        required: false
+      mention_jules:
+        description: "Include @jules tasking"
+        type: boolean
+        default: true
+        required: false
+
+jobs:
+  conflict-resolver:
+    if: inputs.enable_conflict_resolution
+    name: Conflict Resolver
+    uses: SirLocke/ai-runner-workflows/.github/workflows/reusable-conflict-resolver.yml@main
+    secrets: inherit
+
+  ai-reviewer:
+    if: inputs.enable_review
+    name: AI Reviewer
+    uses: SirLocke/ai-runner-workflows/.github/workflows/reusable-reviewer.yml@main
+    with:
+      mention_jules: ${{ inputs.mention_jules }}
+    secrets: inherit

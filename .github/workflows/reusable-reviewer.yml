@@ -1,0 +1,63 @@
+name: Reusable AI Reviewer
+
+on:
+  workflow_call:
+    inputs:
+      mention_jules:
+        description: "Include @jules mention with task checklist"
+        type: boolean
+        default: true
+        required: false
+      base_branch:
+        description: "Target base branch name"
+        type: string
+        default: "main"
+        required: false
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  review:
+    name: AI Reviewer
+    runs-on: [self-hosted, oracle-ai-runner]
+    steps:
+      - name: Checkout PR Branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.ref || github.ref }}
+
+      - name: Fetch Base Branch
+        run: |
+          git fetch origin ${{ github.event.pull_request.base.ref || inputs.base_branch }}
+
+      - name: Generate AI Review
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          EXTRA_ARGS=""
+          if [ "${{ inputs.mention_jules }}" = "true" ]; then
+            EXTRA_ARGS="--mention-jules"
+          fi
+          
+          ai-runner review-local \
+            --dir . \
+            --base origin/${{ github.event.pull_request.base.ref || inputs.base_branch }} \
+            --head HEAD \
+            --title "$PR_TITLE" \
+            --desc "$PR_BODY" \
+            $EXTRA_ARGS \
+            --output "./pr_review.md"
+
+      - name: Post Review Comment
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ -f "./pr_review.md" ]; then
+            gh pr comment ${{ github.event.pull_request.number }} --body-file "./pr_review.md"
+          fi
