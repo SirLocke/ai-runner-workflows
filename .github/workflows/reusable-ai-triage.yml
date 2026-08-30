@@ -1,20 +1,17 @@
-name: Reusable AI Triage Suite
+name: AI
 
 on:
   workflow_call:
     inputs:
       auto_push:
-        description: "Whether to auto-push resolved merge commit"
         type: boolean
         default: true
         required: false
       mention_jules:
-        description: "Include @jules tasking"
         type: boolean
         default: true
         required: false
       base_branch:
-        description: "Target base branch name"
         type: string
         default: "main"
         required: false
@@ -25,21 +22,21 @@ permissions:
   issues: write
 
 jobs:
-  conflict-resolver:
-    name: Conflict Resolver
+  resolve:
+    name: Resolve
     runs-on: [self-hosted, oracle-ai-runner]
     steps:
-      - name: Checkout PR Branch
+      - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
           ref: ${{ github.event.pull_request.head.ref || github.ref }}
 
-      - name: Fetch Target Base Branch
+      - name: Fetch Base
         run: |
           git fetch origin ${{ github.event.pull_request.base.ref || inputs.base_branch }}:${{ github.event.pull_request.base.ref || inputs.base_branch }}
 
-      - name: Check Mergeability
+      - name: Check Merge
         id: merge_check
         run: |
           git config user.name "AI Conflict Resolver Bot"
@@ -52,25 +49,25 @@ jobs:
             echo "has_conflicts=true" >> $GITHUB_OUTPUT
           fi
 
-      - name: Run AI Conflict Resolver
+      - name: Resolve Conflicts
         if: steps.merge_check.outputs.has_conflicts == 'true'
         run: |
           ai-runner resolve-local --dir .
 
-      - name: Execute Safety Guard Tests
+      - name: Guard Tests
         if: steps.merge_check.outputs.has_conflicts == 'true'
         id: test_guard
         run: |
           ai-runner detect-guard --dir . --run
 
-      - name: Commit & Push Verified Resolution
+      - name: Commit & Push
         if: steps.merge_check.outputs.has_conflicts == 'true' && steps.test_guard.outcome == 'success' && inputs.auto_push
         run: |
           git add -A
           git commit -m "chore: auto-resolved merge conflict via local LLM"
           git push origin HEAD:${{ github.event.pull_request.head.ref }}
 
-      - name: Handle Safety Guard Failure
+      - name: Handle Failure
         if: steps.merge_check.outputs.has_conflicts == 'true' && steps.test_guard.outcome == 'failure'
         run: |
           git merge --abort || git reset --hard HEAD
@@ -79,21 +76,21 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  ai-reviewer:
-    name: AI Reviewer
+  review:
+    name: Review
     runs-on: [self-hosted, oracle-ai-runner]
     steps:
-      - name: Checkout PR Branch
+      - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
           ref: ${{ github.event.pull_request.head.ref || github.ref }}
 
-      - name: Fetch Base Branch
+      - name: Fetch Base
         run: |
           git fetch origin ${{ github.event.pull_request.base.ref || inputs.base_branch }}
 
-      - name: Generate AI Review
+      - name: Review
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
           PR_BODY: ${{ github.event.pull_request.body }}
@@ -112,7 +109,7 @@ jobs:
             $EXTRA_ARGS \
             --output "./pr_review.md"
 
-      - name: Post Review Comment
+      - name: Post Comment
         if: always()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

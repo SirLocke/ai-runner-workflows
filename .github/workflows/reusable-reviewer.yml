@@ -1,15 +1,13 @@
-name: Reusable AI Reviewer
+name: Review
 
 on:
   workflow_call:
     inputs:
       mention_jules:
-        description: "Include @jules mention with task checklist"
         type: boolean
         default: true
         required: false
       base_branch:
-        description: "Target base branch name"
         type: string
         default: "main"
         required: false
@@ -21,20 +19,20 @@ permissions:
 
 jobs:
   review:
-    name: AI Reviewer
+    name: Review
     runs-on: [self-hosted, oracle-ai-runner]
     steps:
-      - name: Checkout PR Branch
+      - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
           ref: ${{ github.event.pull_request.head.ref || github.ref }}
 
-      - name: Fetch Base Branch
+      - name: Fetch Base
         run: |
           git fetch origin ${{ github.event.pull_request.base.ref || inputs.base_branch }}
 
-      - name: Generate AI Review
+      - name: Review
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
           PR_BODY: ${{ github.event.pull_request.body }}
@@ -53,7 +51,7 @@ jobs:
             $EXTRA_ARGS \
             --output "./pr_review.md"
 
-      - name: Post Review Comment
+      - name: Post Comment
         if: always()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
