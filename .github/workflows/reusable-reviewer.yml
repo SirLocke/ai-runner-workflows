@@ -54,7 +54,6 @@ jobs:
       - name: Post Comment as User
         if: always()
         run: |
-          if [ -f "./pr_review.md" ]; then
-            # Post using host's SirLocke account
+          if [ -s "./pr_review.md" ] && ! grep -q "No changes detected in diff" ./pr_review.md; then
             gh pr comment ${{ github.event.pull_request.number }} --body-file "./pr_review.md"
           fi
