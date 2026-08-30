@@ -51,11 +51,10 @@ jobs:
             $EXTRA_ARGS \
             --output "./pr_review.md"
 
-      - name: Post Comment
+      - name: Post Comment as User
         if: always()
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           if [ -f "./pr_review.md" ]; then
+            # Post using host's SirLocke account
             gh pr comment ${{ github.event.pull_request.number }} --body-file "./pr_review.md"
           fi
