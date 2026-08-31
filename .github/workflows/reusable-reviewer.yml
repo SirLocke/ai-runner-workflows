@@ -1,4 +1,4 @@
-name: Review
+name: AI
 
 on:
   workflow_call:
@@ -28,11 +28,32 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.event.pull_request.head.ref || github.ref }}
 
+      - name: Check Existing Review
+        id: check_existing
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PR_NUM="${{ github.event.pull_request.number }}"
+          if [ -z "$PR_NUM" ]; then
+            echo "already_reviewed=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          EXISTING=$(gh api repos/${{ github.repository }}/issues/$PR_NUM/comments --jq '.[] | select(.body | contains("## 🤖 AI First-Pass")) | .id' 2>/dev/null | head -n 1)
+          if [ -n "$EXISTING" ]; then
+            echo "already_reviewed=true" >> $GITHUB_OUTPUT
+            echo "ℹ️ PR #$PR_NUM already has an AI First-Pass Review (Comment ID: $EXISTING). Skipping redundant re-review."
+          else
+            echo "already_reviewed=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Fetch Base
+        if: steps.check_existing.outputs.already_reviewed != 'true'
         run: |
           git fetch origin ${{ github.event.pull_request.base.ref || inputs.base_branch }}
 
       - name: Review
+        if: steps.check_existing.outputs.already_reviewed != 'true'
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
           PR_BODY: ${{ github.event.pull_request.body }}
@@ -52,7 +73,9 @@ jobs:
             --output "./pr_review.md"
 
       - name: Post Comment as User
-        if: always()
+        if: steps.check_existing.outputs.already_reviewed != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           if [ -s "./pr_review.md" ] && ! grep -q "No changes detected in diff" ./pr_review.md; then
             gh pr comment ${{ github.event.pull_request.number }} --body-file "./pr_review.md"
