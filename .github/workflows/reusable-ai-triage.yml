@@ -13,14 +13,72 @@ on:
         required: false
 
 permissions:
-  contents: read
+  contents: write
   pull-requests: write
   issues: write
 
 jobs:
+  resolve:
+    name: Resolve
+    runs-on: [self-hosted, oracle-ai-runner]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.ref || github.ref }}
+
+      - name: Fetch Base
+        run: |
+          git fetch origin ${{ github.event.pull_request.base.ref || inputs.base_branch }}:${{ github.event.pull_request.base.ref || inputs.base_branch }}
+
+      - name: Check Merge
+        id: merge_check
+        run: |
+          git config user.name "AI Conflict Resolver Bot"
+          git config user.email "ai-runner@internal"
+          git config diff.algorithm histogram
+          git config merge.conflictstyle zdiff3
+          
+          if git merge --no-commit --no-ff -X histogram ${{ github.event.pull_request.base.ref || inputs.base_branch }}; then
+            echo "has_conflicts=false" >> $GITHUB_OUTPUT
+            git merge --abort || true
+          else
+            echo "has_conflicts=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Resolve Conflicts
+        if: steps.merge_check.outputs.has_conflicts == 'true'
+        run: |
+          ai-runner resolve-local --dir .
+
+      - name: Guard Tests
+        if: steps.merge_check.outputs.has_conflicts == 'true'
+        id: test_guard
+        run: |
+          ai-runner detect-guard --dir . --run
+
+      - name: Commit & Push
+        if: steps.merge_check.outputs.has_conflicts == 'true' && steps.test_guard.outcome == 'success'
+        run: |
+          git add -u
+          git commit -m "chore: auto-resolved merge conflict via local LLM"
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
+
+      - name: Handle Failure
+        if: steps.merge_check.outputs.has_conflicts == 'true' && steps.test_guard.outcome == 'failure'
+        run: |
+          git merge --abort || git reset --hard HEAD
+          gh pr comment ${{ github.event.pull_request.number }} --body "⚠️ **Conflict Resolution Failed Safety Guard**: Local LLM resolved markers but unit tests failed. Merge aborted."
+          exit 1
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   review:
     name: Review
     runs-on: [self-hosted, oracle-ai-runner]
+    needs: [resolve]
+    if: always() && !cancelled() && needs.resolve.result != 'failure'
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -92,6 +150,5 @@ jobs:
             echo "================================================================"
             echo "🎉 Verdict is LGTM / No actionable changes needed."
             echo "🤫 Not posting comment to PR #$PR_NUM because code looks good and clean!"
-            echo "   (This prevents unnecessary bot mentions and reaction loops)"
             echo "================================================================"
           fi
