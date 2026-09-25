@@ -21,18 +21,43 @@ jobs:
   resolve:
     name: Resolve
     runs-on: [self-hosted, oracle-ai-runner]
+    outputs:
+      is_open: ${{ steps.check_pr_open.outputs.is_open }}
     steps:
+      - name: Verify PR Open
+        id: check_pr_open
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PR_NUM="${{ github.event.pull_request.number }}"
+          if [ -n "$PR_NUM" ]; then
+            STATE=$(gh pr view "$PR_NUM" --repo "${{ github.repository }}" --json state --jq .state 2>/dev/null || echo "UNKNOWN")
+            echo "PR #$PR_NUM current state: $STATE"
+            if [ "$STATE" != "OPEN" ] && [ "$STATE" != "UNKNOWN" ]; then
+              echo "is_open=false" >> $GITHUB_OUTPUT
+              echo "================================================================"
+              echo "🛑 PR #$PR_NUM is $STATE (not OPEN)."
+              echo "⏭️ Skipping merge conflict resolution."
+              echo "================================================================"
+              exit 0
+            fi
+          fi
+          echo "is_open=true" >> $GITHUB_OUTPUT
+
       - name: Checkout
+        if: steps.check_pr_open.outputs.is_open != 'false'
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
           ref: ${{ github.event.pull_request.head.ref || github.ref }}
 
       - name: Fetch Base
+        if: steps.check_pr_open.outputs.is_open != 'false'
         run: |
           git fetch origin ${{ github.event.pull_request.base.ref || inputs.base_branch }}:${{ github.event.pull_request.base.ref || inputs.base_branch }}
 
       - name: Check Merge
+        if: steps.check_pr_open.outputs.is_open != 'false'
         id: merge_check
         run: |
           git config user.name "AI Conflict Resolver Bot"
@@ -48,25 +73,25 @@ jobs:
           fi
 
       - name: Resolve Conflicts
-        if: steps.merge_check.outputs.has_conflicts == 'true'
+        if: steps.check_pr_open.outputs.is_open != 'false' && steps.merge_check.outputs.has_conflicts == 'true'
         run: |
           ai-runner resolve-local --dir .
 
       - name: Guard Tests
-        if: steps.merge_check.outputs.has_conflicts == 'true'
+        if: steps.check_pr_open.outputs.is_open != 'false' && steps.merge_check.outputs.has_conflicts == 'true'
         id: test_guard
         run: |
           ai-runner detect-guard --dir . --run
 
       - name: Commit & Push
-        if: steps.merge_check.outputs.has_conflicts == 'true' && steps.test_guard.outcome == 'success'
+        if: steps.check_pr_open.outputs.is_open != 'false' && steps.merge_check.outputs.has_conflicts == 'true' && steps.test_guard.outcome == 'success'
         run: |
           git add -u
           git commit -m "chore: auto-resolved merge conflict via local LLM"
           git push origin HEAD:${{ github.event.pull_request.head.ref }}
 
       - name: Handle Failure
-        if: steps.merge_check.outputs.has_conflicts == 'true' && steps.test_guard.outcome == 'failure'
+        if: steps.check_pr_open.outputs.is_open != 'false' && steps.merge_check.outputs.has_conflicts == 'true' && steps.test_guard.outcome == 'failure'
         run: |
           git merge --abort || git reset --hard HEAD
           gh pr comment ${{ github.event.pull_request.number }} --body "⚠️ **Conflict Resolution Failed Safety Guard**: Local LLM resolved markers but unit tests failed. Merge aborted."
@@ -78,46 +103,62 @@ jobs:
     name: Review
     runs-on: [self-hosted, oracle-ai-runner]
     needs: [resolve]
-    if: always() && !cancelled() && needs.resolve.result != 'failure'
+    if: always() && !cancelled() && needs.resolve.result != 'failure' && needs.resolve.outputs.is_open != 'false'
     steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-          ref: ${{ github.event.pull_request.head.ref || github.ref }}
-
-      - name: Check Existing Review
-        id: check_existing
+      - name: Check PR Open & Existing Review
+        id: check_review_needed
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           PR_NUM="${{ github.event.pull_request.number }}"
           if [ -z "$PR_NUM" ]; then
-            echo "already_reviewed=false" >> $GITHUB_OUTPUT
+            echo "skip_review=false" >> $GITHUB_OUTPUT
             echo "ℹ️ No PR number detected. Proceeding..."
             exit 0
           fi
-          
+
+          # 1. Check if PR is still OPEN
+          STATE=$(gh pr view "$PR_NUM" --repo "${{ github.repository }}" --json state --jq .state 2>/dev/null || echo "UNKNOWN")
+          echo "PR #$PR_NUM current state: $STATE"
+          if [ "$STATE" != "OPEN" ] && [ "$STATE" != "UNKNOWN" ]; then
+            echo "skip_review=true" >> $GITHUB_OUTPUT
+            echo "================================================================"
+            echo "🛑 PR #$PR_NUM is $STATE (not OPEN)."
+            echo "⏭️ Skipping AI review completely to avoid redundant CPU usage."
+            echo "================================================================"
+            exit 0
+          fi
+
+          # 2. Check if already reviewed
           EXISTING=$(gh api repos/${{ github.repository }}/issues/$PR_NUM/comments --jq '.[] | select(.body | contains("## 🤖 AI First-Pass")) | .id' 2>/dev/null | head -n 1)
           if [ -n "$EXISTING" ]; then
-            echo "already_reviewed=true" >> $GITHUB_OUTPUT
+            echo "skip_review=true" >> $GITHUB_OUTPUT
             echo "================================================================"
             echo "ℹ️ PR #$PR_NUM already has an AI First-Pass Review (Comment ID: $EXISTING)."
             echo "⏭️ Skipping redundant re-review to keep discussion clean."
             echo "================================================================"
           else
-            echo "already_reviewed=false" >> $GITHUB_OUTPUT
+            echo "skip_review=false" >> $GITHUB_OUTPUT
             echo "================================================================"
-            echo "✨ No previous AI review found on PR #$PR_NUM."
+            echo "✨ PR #$PR_NUM is OPEN and has no previous AI review."
             echo "🚀 Proceeding with First-Pass AI Review..."
             echo "================================================================"
           fi
 
+      - name: Checkout
+        if: steps.check_review_needed.outputs.skip_review != 'true'
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.ref || github.ref }}
+
       - name: Fetch Base
-        if: steps.check_existing.outputs.already_reviewed != 'true'
+        if: steps.check_review_needed.outputs.skip_review != 'true'
         run: |
           git fetch origin ${{ github.event.pull_request.base.ref || inputs.base_branch }}
 
       - name: Review
-        if: steps.check_existing.outputs.already_reviewed != 'true'
+        if: steps.check_review_needed.outputs.skip_review != 'true'
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
           PR_BODY: ${{ github.event.pull_request.body }}
@@ -137,7 +178,7 @@ jobs:
             --output "./pr_review.md"
 
       - name: Post Comment or Report Status
-        if: steps.check_existing.outputs.already_reviewed != 'true'
+        if: steps.check_review_needed.outputs.skip_review != 'true'
         run: |
           PR_NUM="${{ github.event.pull_request.number }}"
           if [ -s "./pr_review.md" ] && ! grep -q "No changes detected in diff" ./pr_review.md; then
