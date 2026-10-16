@@ -97,7 +97,7 @@ jobs:
           gh pr comment ${{ github.event.pull_request.number }} --body "⚠️ **Conflict Resolution Failed Safety Guard**: Local LLM resolved markers but unit tests failed. Merge aborted."
           exit 1
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN || github.token }}
 
   review:
     name: Review
@@ -108,7 +108,7 @@ jobs:
       - name: Check PR Open & Existing Review
         id: check_review_needed
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN || github.token }}
         run: |
           PR_NUM="${{ github.event.pull_request.number }}"
           if [ -z "$PR_NUM" ]; then
@@ -180,7 +180,7 @@ jobs:
       - name: Post Comment or Report Status
         if: steps.check_review_needed.outputs.skip_review != 'true'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN || github.token }}
         run: |
           PR_NUM="${{ github.event.pull_request.number }}"
           if [ -s "./pr_review.md" ] && ! grep -q "No changes detected in diff" ./pr_review.md; then
