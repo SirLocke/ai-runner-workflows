@@ -179,6 +179,8 @@ jobs:
 
       - name: Post Comment or Report Status
         if: steps.check_review_needed.outputs.skip_review != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           PR_NUM="${{ github.event.pull_request.number }}"
           if [ -s "./pr_review.md" ] && ! grep -q "No changes detected in diff" ./pr_review.md; then
