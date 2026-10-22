@@ -86,7 +86,8 @@ jobs:
             echo "================================================================"
             echo "📝 Posting actionable review feedback as user to PR #$PR_NUM..."
             echo "================================================================"
-            gh pr comment $PR_NUM --body-file "./pr_review.md"
+            unset GH_TOKEN GITHUB_TOKEN
+            gh pr comment $PR_NUM --repo "${{ github.repository }}" --body-file "./pr_review.md"
             echo "✅ Successfully posted review comment as user with action items."
           else
             echo "================================================================"

@@ -179,15 +179,14 @@ jobs:
 
       - name: Post Comment or Report Status
         if: steps.check_review_needed.outputs.skip_review != 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN || github.token }}
         run: |
           PR_NUM="${{ github.event.pull_request.number }}"
           if [ -s "./pr_review.md" ] && ! grep -q "No changes detected in diff" ./pr_review.md; then
             echo "================================================================"
             echo "📝 Posting actionable review feedback as user to PR #$PR_NUM..."
             echo "================================================================"
-            gh pr comment $PR_NUM --body-file "./pr_review.md"
+            unset GH_TOKEN GITHUB_TOKEN
+            gh pr comment $PR_NUM --repo "${{ github.repository }}" --body-file "./pr_review.md"
             echo "✅ Successfully posted review comment as user with action items."
           else
             echo "================================================================"
