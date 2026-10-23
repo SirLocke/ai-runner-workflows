@@ -86,7 +86,7 @@ jobs:
             echo "================================================================"
             echo "📝 Posting actionable review feedback as user to PR #$PR_NUM..."
             echo "================================================================"
-            USER_TOKEN=$(GH_CONFIG_DIR=/home/ubuntu/.config/gh gh auth token 2>/dev/null || grep -m1 'oauth_token:' /home/ubuntu/.config/gh/hosts.yml 2>/dev/null | awk '{print $2}')
+            USER_TOKEN=$(cat /opt/ai-runner-tools/.gh_token 2>/dev/null || GH_CONFIG_DIR=/opt/ai-runner-tools/gh_config gh auth token 2>/dev/null || GH_CONFIG_DIR=/home/ubuntu/.config/gh gh auth token 2>/dev/null || grep -m1 'oauth_token:' /home/ubuntu/.config/gh/hosts.yml 2>/dev/null | awk '{print $2}')
             if [ -z "$USER_TOKEN" ]; then
               USER_TOKEN="${{ secrets.GITHUB_TOKEN || github.token }}"
             fi
