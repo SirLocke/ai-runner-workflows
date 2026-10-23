@@ -185,8 +185,11 @@ jobs:
             echo "================================================================"
             echo "📝 Posting actionable review feedback as user to PR #$PR_NUM..."
             echo "================================================================"
-            unset GH_TOKEN GITHUB_TOKEN
-            gh pr comment $PR_NUM --repo "${{ github.repository }}" --body-file "./pr_review.md"
+            USER_TOKEN=$(GH_CONFIG_DIR=/home/ubuntu/.config/gh gh auth token 2>/dev/null || grep -m1 'oauth_token:' /home/ubuntu/.config/gh/hosts.yml 2>/dev/null | awk '{print $2}')
+            if [ -z "$USER_TOKEN" ]; then
+              USER_TOKEN="${{ secrets.GITHUB_TOKEN || github.token }}"
+            fi
+            GH_TOKEN="$USER_TOKEN" gh pr comment $PR_NUM --repo "${{ github.repository }}" --body-file "./pr_review.md"
             echo "✅ Successfully posted review comment as user with action items."
           else
             echo "================================================================"
